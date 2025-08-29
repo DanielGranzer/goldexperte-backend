@@ -1,0 +1,211 @@
+version: '3.8'
+
+services:
+  # Traefik Reverse Proxy
+  traefik:
+    image: traefik:v3.0
+    container_name: goldexperte-traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"  # Traefik dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - traefik-acme:/acme
+    environment:
+      - TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_EMAIL=${ACME_EMAIL}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.${MAIN_DOMAIN}`)"
+      - "traefik.http.routers.traefik.tls=true"
+      - "traefik.http.routers.traefik.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik.service=api@internal"
+    networks:
+      - goldexperte-network
+
+  # MariaDB Database
+  db:
+    image: mariadb:10.11
+    container_name: goldexperte-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - goldexperte-db-data:/var/lib/mysql
+      - ./database/init:/docker-entrypoint-initdb.d
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --innodb-file-per-table=1
+      - --max-connections=200
+      - --innodb-buffer-pool-size=512M
+    healthcheck:
+      test: ["CMD-SHELL", "mysql -h localhost -u${DB_USER} -p${DB_PASSWORD} ${DB_NAME} -e 'SHOW TABLES;'"]
+      interval: 10s
+      retries: 6
+      start_period: 1m
+      timeout: 3s
+    networks:
+      - goldexperte-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: goldexperte-redis
+    restart: unless-stopped
+    command: 
+      - redis-server
+      - --maxmemory 256mb
+      - --maxmemory-policy volatile-lru
+      - --save ""
+    volumes:
+      - goldexperte-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - goldexperte-network
+
+  # Elasticsearch
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: goldexperte-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - bootstrap.memory_lock=true
+    volumes:
+      - goldexperte-elasticsearch-data:/usr/share/elasticsearch/data
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - goldexperte-network
+
+  # PHP-FPM
+  php:
+    build:
+      context: ./docker/php
+      dockerfile: Dockerfile
+    container_name: goldexperte-php
+    restart: unless-stopped
+    user: "${DOCKER_USER:-1000:1000}"
+    environment:
+      PHP_MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
+      PIMCORE_ENVIRONMENT: ${PIMCORE_ENVIRONMENT:-prod}
+      DATABASE_URL: "mysql://${DB_USER}:${DB_PASSWORD}@db:3306/${DB_NAME}"
+      REDIS_URL: "redis://redis:6379"
+      ELASTICSEARCH_URL: "http://elasticsearch:9200"
+      MAILER_DSN: ${MAILER_DSN}
+      APP_SECRET: ${APP_SECRET}
+    volumes:
+      - ./pimcore:/var/www/html
+      - goldexperte-pimcore-var:/var/www/html/var
+      - goldexperte-pimcore-public-var:/var/www/html/public/var
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - goldexperte-network
+
+  # Nginx Web Server
+  nginx:
+    build:
+      context: ./docker/nginx
+      dockerfile: Dockerfile
+    container_name: goldexperte-nginx
+    restart: unless-stopped
+    volumes:
+      - ./pimcore:/var/www/html:ro
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d:ro
+      - goldexperte-pimcore-public-var:/var/www/html/public/var:ro
+    depends_on:
+      - php
+    labels:
+      # Admin Panel
+      - "traefik.enable=true"
+      - "traefik.http.routers.admin.rule=Host(`${ADMIN_DOMAIN}`)"
+      - "traefik.http.routers.admin.tls=true"
+      - "traefik.http.routers.admin.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.admin.service=admin"
+      - "traefik.http.services.admin.loadbalancer.server.port=80"
+      
+      # API Endpoint
+      - "traefik.http.routers.api.rule=Host(`${API_DOMAIN}`)"
+      - "traefik.http.routers.api.tls=true"
+      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.api.service=api"
+      - "traefik.http.services.api.loadbalancer.server.port=80"
+    networks:
+      - goldexperte-network
+
+  # Supervisor for Background Tasks
+  supervisor:
+    build:
+      context: ./docker/supervisor
+      dockerfile: Dockerfile
+    container_name: goldexperte-supervisor
+    restart: unless-stopped
+    user: "${DOCKER_USER:-1000:1000}"
+    environment:
+      PHP_MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
+      PIMCORE_ENVIRONMENT: ${PIMCORE_ENVIRONMENT:-prod}
+      DATABASE_URL: "mysql://${DB_USER}:${DB_PASSWORD}@db:3306/${DB_NAME}"
+      REDIS_URL: "redis://redis:6379"
+      ELASTICSEARCH_URL: "http://elasticsearch:9200"
+    volumes:
+      - ./pimcore:/var/www/html
+      - goldexperte-pimcore-var:/var/www/html/var
+      - ./docker/supervisor/conf.d:/etc/supervisor/conf.d:ro
+    depends_on:
+      - db
+      - redis
+      - php
+    networks:
+      - goldexperte-network
+
+  # MailHog for Email Testing
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: goldexperte-mailhog
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mailhog.rule=Host(`mailhog.${MAIN_DOMAIN}`)"
+      - "traefik.http.routers.mailhog.tls=true"
+      - "traefik.http.routers.mailhog.tls.certresolver=letsencrypt"
+      - "traefik.http.services.mailhog.loadbalancer.server.port=8025"
+    networks:
+      - goldexperte-network
+
+volumes:
+  goldexperte-db-data:
+  goldexperte-redis-data:
+  goldexperte-elasticsearch-data:
+  goldexperte-pimcore-var:
+  goldexperte-pimcore-public-var:
+  traefik-acme:
+
+networks:
+  goldexperte-network:
+    driver: bridge

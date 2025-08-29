@@ -1,0 +1,78 @@
+# Dynamic configuration for Traefik
+http:
+  # Middlewares
+  middlewares:
+    # Security headers
+    security-headers:
+      headers:
+        accessControlAllowMethods:
+          - GET
+          - OPTIONS
+          - PUT
+          - POST
+          - DELETE
+        accessControlMaxAge: 100
+        hostsProxyHeaders:
+          - "X-Forwarded-Host"
+        referrerPolicy: "same-origin"
+        customRequestHeaders:
+          X-Forwarded-Proto: "https"
+        customResponseHeaders:
+          X-Frame-Options: "SAMEORIGIN"
+          X-XSS-Protection: "1; mode=block"
+          X-Content-Type-Options: "nosniff"
+        
+    # Rate limiting
+    api-rate-limit:
+      rateLimit:
+        burst: 20
+        average: 10
+        
+    admin-rate-limit:
+      rateLimit:
+        burst: 10
+        average: 5
+
+    # Admin authentication (basic auth for additional security)
+    admin-auth:
+      basicAuth:
+        users:
+          # Generate with: echo $(htpasswd -nb admin password) | sed -e s/\\$/\\$\\$/g
+          # Default: admin:admin (change this!)
+          - "admin:$2y$10$2Yn2D2eMd5ZYNQ5HZz5cXe5oZr6OzOzJ5Ic0Zj5h5Zk5Z5ZZ5Z5Z5Z"
+
+    # CORS for API
+    api-cors:
+      headers:
+        accessControlAllowOriginList:
+          - "https://www.diegoldexperten.com"
+          - "https://diegoldexperten.com"
+        accessControlAllowHeaders:
+          - "Accept"
+          - "Authorization" 
+          - "Cache-Control"
+          - "Content-Type"
+          - "DNT"
+          - "If-Modified-Since"
+          - "Keep-Alive"
+          - "Origin"
+          - "User-Agent"
+          - "X-Requested-With"
+        accessControlAllowCredentials: true
+        accessControlExposeHeaders:
+          - "Content-Length"
+          - "Content-Range"
+
+  # Services (if needed for load balancing)
+  services: {}
+
+# TLS configuration
+tls:
+  options:
+    default:
+      minVersion: "VersionTLS12"
+      cipherSuites:
+        - "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"
+        - "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305"
+        - "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"
+        - "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256"

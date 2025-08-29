@@ -1,0 +1,286 @@
+# Goldexperte Pimcore Server Provisioning Playbook
+# This playbook sets up the production environment for Goldexperte Pimcore
+
+---
+- hosts: pimcore_servers
+  become: yes
+  gather_facts: yes
+
+  vars:
+    # Project configuration
+    project_name: goldexperte-pimcore
+    project_dir: /opt/goldexperte-pimcore
+    data_dir: /mnt/pimcore-data
+    
+    # Docker configuration
+    docker_compose_version: "2.21.0"
+    
+    # Git repository (adjust as needed)
+    git_repo_url: "{{ git_repo_url | default('https://github.com/yourusername/goldexperte-backend.git') }}"
+    git_branch: "{{ git_branch | default('main') }}"
+    
+    # Environment configuration
+    environment: "{{ environment | default('prod') }}"
+    main_domain: "{{ main_domain | default('diegoldexperten.com') }}"
+    admin_domain: "{{ admin_domain | default('admin.diegoldexperten.com') }}"
+    api_domain: "{{ api_domain | default('api.diegoldexperten.com') }}"
+    acme_email: "{{ acme_email | default('admin@diegoldexperten.com') }}"
+    
+    # Database configuration
+    mysql_root_password: "{{ mysql_root_password | default('secure_root_password') }}"
+    mysql_pimcore_user: "{{ mysql_pimcore_user | default('pimcore') }}"
+    mysql_pimcore_password: "{{ mysql_pimcore_password | default('secure_pimcore_password') }}"
+    mysql_pimcore_database: "{{ mysql_pimcore_database | default('goldexperte_pimcore') }}"
+    
+    # Pimcore admin configuration
+    pimcore_admin: "{{ pimcore_admin | default('admin') }}"
+    pimcore_admin_password: "{{ pimcore_admin_password | default('secure_admin_password') }}"
+    
+    # SSL/TLS configuration
+    ssl_cert_email: "{{ acme_email }}"
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install required system packages
+      apt:
+        name:
+          - curl
+          - wget
+          - git
+          - htop
+          - vim
+          - unzip
+          - software-properties-common
+          - apt-transport-https
+          - ca-certificates
+          - gnupg
+          - lsb-release
+          - python3-pip
+          - python3-setuptools
+          - rsync
+          - logrotate
+        state: present
+
+    - name: Install Docker if not present
+      block:
+        - name: Check if Docker is installed
+          command: docker --version
+          register: docker_check
+          ignore_errors: yes
+
+        - name: Add Docker GPG key
+          apt_key:
+            url: https://download.docker.com/linux/ubuntu/gpg
+            state: present
+          when: docker_check.failed
+
+        - name: Add Docker repository
+          apt_repository:
+            repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+            state: present
+          when: docker_check.failed
+
+        - name: Install Docker
+          apt:
+            name:
+              - docker-ce
+              - docker-ce-cli
+              - containerd.io
+              - docker-compose-plugin
+            state: present
+            update_cache: yes
+          when: docker_check.failed
+
+        - name: Start and enable Docker service
+          systemd:
+            name: docker
+            state: started
+            enabled: yes
+
+    - name: Create project directory
+      file:
+        path: "{{ project_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Create data directory structure
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - "{{ data_dir }}"
+        - "{{ data_dir }}/mysql"
+        - "{{ data_dir }}/elasticsearch"
+        - "{{ data_dir }}/redis"
+        - "{{ data_dir }}/pimcore"
+        - "{{ data_dir }}/logs"
+        - "{{ data_dir }}/ssl"
+
+    - name: Clone or update project repository
+      git:
+        repo: "{{ git_repo_url }}"
+        dest: "{{ project_dir }}"
+        version: "{{ git_branch }}"
+        force: yes
+      notify: restart docker services
+
+    - name: Create environment file from template
+      template:
+        src: production.env.j2
+        dest: "{{ project_dir }}/.env"
+        owner: root
+        group: root
+        mode: '0600'
+      notify: restart docker services
+
+    - name: Create Docker volumes for data persistence
+      docker_volume:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - goldexperte-db-data
+        - goldexperte-redis-data
+        - goldexperte-elasticsearch-data
+        - goldexperte-pimcore-var
+        - goldexperte-pimcore-public-var
+        - traefik-acme
+
+    - name: Create log rotation configuration
+      copy:
+        content: |
+          {{ data_dir }}/logs/*.log {
+              daily
+              missingok
+              rotate 30
+              compress
+              delaycompress
+              notifempty
+              create 644 root root
+          }
+        dest: /etc/logrotate.d/goldexperte-pimcore
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Setup firewall rules
+      ufw:
+        rule: "{{ item.rule }}"
+        port: "{{ item.port }}"
+        proto: "{{ item.proto | default('tcp') }}"
+        comment: "{{ item.comment }}"
+      loop:
+        - { rule: allow, port: 22, comment: "SSH" }
+        - { rule: allow, port: 80, comment: "HTTP" }
+        - { rule: allow, port: 443, comment: "HTTPS" }
+        - { rule: allow, port: 8080, comment: "Traefik Dashboard" }
+
+    - name: Enable UFW firewall
+      ufw:
+        state: enabled
+        policy: deny
+        direction: incoming
+
+    - name: Start Docker Compose services
+      docker_compose:
+        project_src: "{{ project_dir }}"
+        file: docker-compose.prod.yml
+        state: present
+        pull: yes
+        build: yes
+      register: docker_compose_result
+
+    - name: Wait for services to be ready
+      pause:
+        seconds: 30
+      when: docker_compose_result.changed
+
+    - name: Check if Pimcore is installed
+      shell: |
+        docker-compose -f {{ project_dir }}/docker-compose.prod.yml exec -T php test -f /var/www/html/var/config/system.yml
+      register: pimcore_installed
+      ignore_errors: yes
+
+    - name: Install Pimcore if not already installed
+      shell: |
+        cd {{ project_dir }}
+        docker-compose -f docker-compose.prod.yml exec -T php vendor/bin/pimcore-install \
+          --mysql-host-socket=db \
+          --mysql-username={{ mysql_pimcore_user }} \
+          --mysql-password={{ mysql_pimcore_password }} \
+          --mysql-database={{ mysql_pimcore_database }} \
+          --admin-username={{ pimcore_admin }} \
+          --admin-password={{ pimcore_admin_password }} \
+          --install-bundles=PimcoreApplicationLoggerBundle,PimcoreCustomReportsBundle,PimcoreSeoBundle,PimcoreSimpleBackendSearchBundle,PimcoreStaticRoutesBundle,PimcoreTinymceBundle,PimcoreUuidBundle,PimcoreEcommerceFrameworkBundle \
+          --no-interaction
+      when: pimcore_installed.rc != 0
+
+    - name: Configure Pimcore for headless mode
+      shell: |
+        cd {{ project_dir }}
+        docker-compose -f docker-compose.prod.yml exec -T php php bin/console cache:clear --env=prod
+        docker-compose -f docker-compose.prod.yml exec -T php php bin/console cache:warmup --env=prod
+      when: pimcore_installed.rc != 0
+
+    - name: Setup monitoring script
+      copy:
+        content: |
+          #!/bin/bash
+          # Goldexperte Pimcore Health Check Script
+          
+          cd {{ project_dir }}
+          
+          # Check if all containers are running
+          if ! docker-compose -f docker-compose.prod.yml ps | grep -q "Up"; then
+              echo "Some containers are not running!"
+              docker-compose -f docker-compose.prod.yml ps
+              exit 1
+          fi
+          
+          # Check if Pimcore admin is accessible
+          if ! curl -f -s http://localhost/admin > /dev/null; then
+              echo "Pimcore admin is not accessible!"
+              exit 1
+          fi
+          
+          echo "All services are healthy"
+        dest: /usr/local/bin/goldexperte-health-check
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Setup cron jobs
+      cron:
+        name: "{{ item.name }}"
+        minute: "{{ item.minute }}"
+        hour: "{{ item.hour | default('*') }}"
+        job: "{{ item.job }}"
+        user: root
+      loop:
+        - name: "Pimcore maintenance"
+          minute: "0"
+          hour: "2"
+          job: "cd {{ project_dir }} && docker-compose -f docker-compose.prod.yml exec -T php php bin/console pimcore:maintenance"
+        - name: "Health check"
+          minute: "*/5"
+          job: "/usr/local/bin/goldexperte-health-check"
+        - name: "Docker cleanup"
+          minute: "0"
+          hour: "3"
+          job: "docker system prune -f"
+
+  handlers:
+    - name: restart docker services
+      docker_compose:
+        project_src: "{{ project_dir }}"
+        file: docker-compose.prod.yml
+        state: present
+        restarted: yes

@@ -1,0 +1,34 @@
+# Terraform Variables Configuration
+# Copy this file to terraform.tfvars and adjust the values
+
+# Required: Hetzner Cloud API Token
+hcloud_token = "your-hetzner-cloud-api-token-here"
+
+# Server Configuration
+server_type     = "cx31"    # 2 vCPUs, 8GB RAM, 80GB SSD
+server_location = "nbg1"    # Nuremberg (change to fsn1 for Falkenstein or hel1 for Helsinki)
+volume_size     = 100       # Data volume size in GB
+
+# Environment
+environment = "prod"        # or "dev", "staging"
+
+# Security Configuration
+# IMPORTANT: Replace these with your actual IP addresses!
+allowed_ssh_ips = [
+  "0.0.0.0/0"  # Allow SSH from anywhere (CHANGE THIS!)
+]
+
+allowed_admin_ips = [
+  "0.0.0.0/0"  # Allow admin access from anywhere (CHANGE THIS!)
+]
+
+# Load Balancer (optional for high availability)
+enable_load_balancer = false
+
+# Domain Configuration
+main_domain  = "diegoldexperten.com"
+admin_domain = "admin.diegoldexperten.com"
+api_domain   = "api.diegoldexperten.com"
+
+# SSL Configuration
+acme_email = "admin@diegoldexperten.com"

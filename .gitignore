@@ -1,0 +1,60 @@
+# Environment files
+.env
+.env.local
+.env.production
+pimcore/.env
+
+# Pimcore application (will be created by init script)
+pimcore/
+
+# Terraform
+devops/terraform/.terraform/
+devops/terraform/.terraform.lock.hcl
+devops/terraform/terraform.tfstate
+devops/terraform/terraform.tfstate.backup
+devops/terraform/terraform.tfvars
+devops/terraform/tfplan
+
+# Ansible
+devops/ansible/inventory
+devops/ansible/*.retry
+
+# Docker
+docker-compose.override.yml
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+
+# SSL certificates (local)
+ssl/
+certs/
+
+# Node modules (if any)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Backup files
+*.backup
+*.bak
+*.old
+
+# Local development overrides
+docker-compose.dev.yml
+docker-compose.local.yml
