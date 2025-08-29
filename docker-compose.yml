@@ -66,7 +66,7 @@ services:
   php:
     image: pimcore/pimcore:php8.2-debug-latest
     container_name: goldexperte-dev-php
-    user: "${DOCKER_USER:-1000:1000}"
+    # user: "${DOCKER_USER:-1000:1000}"
     environment:
       COMPOSER_HOME: /var/www/html
       PHP_IDE_CONFIG: serverName=localhost
@@ -113,7 +113,7 @@ services:
   supervisor:
     image: pimcore/pimcore:php8.2-supervisord-latest
     container_name: goldexperte-dev-supervisor
-    user: "${DOCKER_USER:-1000:1000}"
+    # user: "${DOCKER_USER:-1000:1000}"
     environment:
       PHP_MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
       PIMCORE_ENVIRONMENT: ${PIMCORE_ENVIRONMENT:-dev}

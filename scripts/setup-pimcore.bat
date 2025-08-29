@@ -13,13 +13,20 @@ if errorlevel 1 (
 REM Wait for database to be ready
 echo ⏳ Waiting for database to be ready...
 :waitdb
-docker-compose exec php bash -c "mysql -h db -u pimcore -ppimcore_password goldexperte_pimcore -e 'SELECT 1'" >nul 2>&1
+docker-compose exec db mysql -u pimcore -ppimcore_password goldexperte_pimcore -e "SELECT 1;" >nul 2>&1
 if errorlevel 1 (
     echo Waiting for database...
-    timeout /t 2 >nul
+    timeout /t 5 >nul
     goto waitdb
 )
 echo Database is ready!
+
+REM Check if Pimcore is already installed
+docker-compose exec php test -f var/config/system.yml >nul 2>&1
+if not errorlevel 1 (
+    echo ⚠️  Pimcore is already installed! Skipping installation...
+    goto permissions
+)
 
 REM Install Pimcore
 echo 🏗️ Installing Pimcore...
@@ -30,6 +37,7 @@ echo 🎯 Configuring headless mode...
 docker-compose exec php bash -c "php bin/console cache:clear && php bin/console cache:warmup"
 
 REM Set proper permissions
+:permissions
 echo 🔐 Setting final permissions...
 docker-compose exec php bash -c "chown -R www-data:www-data /var/www/html/var /var/www/html/public/var && chmod -R 755 /var/www/html/var /var/www/html/public/var"
 
