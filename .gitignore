@@ -7,6 +7,12 @@ pimcore/.env
 # Pimcore application (will be created by init script)
 pimcore/
 
+# Pimcore sensitive configuration files (extra security)
+pimcore/config/local/
+pimcore/var/config/system.yml
+pimcore/var/config/extensions.yml
+pimcore/config/local/database.yaml
+
 # Terraform
 devops/terraform/.terraform/
 devops/terraform/.terraform.lock.hcl

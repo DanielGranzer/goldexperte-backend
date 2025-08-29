@@ -73,6 +73,13 @@ services:
       PHP_MEMORY_LIMIT: ${PHP_MEMORY_LIMIT:-2048M}
       PIMCORE_ENVIRONMENT: ${PIMCORE_ENVIRONMENT:-dev}
       
+      # Database Environment Variables for Pimcore Runtime
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_NAME: ${DB_NAME:-goldexperte_pimcore}
+      DB_USER: ${DB_USER:-pimcore}
+      DB_PASSWORD: ${DB_PASSWORD:-pimcore_password}
+      
       # Pimcore Installation Config
       PIMCORE_INSTALL_MYSQL_USERNAME: ${DB_USER:-pimcore}
       PIMCORE_INSTALL_MYSQL_PASSWORD: ${DB_PASSWORD:-pimcore_password}
