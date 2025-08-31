@@ -1,0 +1,26 @@
+# Symfony Services Configuration for Metals API Integration
+
+services:
+    # Metals API Service Configuration
+    App\Service\MetalsApiService:
+        arguments:
+            $apiKey: '%env(METALS_API_KEY)%'
+        tags:
+            - { name: 'monolog.logger', channel: 'metals_api' }
+
+    # Console Commands
+    App\Command\UpdateMetalPricesCommand:
+        tags:
+            - { name: 'console.command' }
+
+    # Controllers
+    App\Controller\Api\MetalPricesController:
+        tags:
+            - { name: 'controller.service_arguments' }
+
+# Environment Variables Required
+# Add these to your .env file:
+# 
+# METALS_API_KEY=your-metals-api-key-here
+# ADMIN_API_KEY=your-admin-secret-key
+# METALS_API_BASE_URL=https://metals-api.com/api
